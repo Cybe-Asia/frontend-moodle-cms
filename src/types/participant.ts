@@ -1,4 +1,14 @@
-export type EnrollmentStatus = 'active' | 'expired' | 'suspended' | 'pending'
+export type EnrollmentStatus = 'active' | 'expired' | 'suspended' | 'pending' | 'unenrolled'
+
+export interface EnrollmentSummary {
+  total: number
+  active: number
+  pending: number
+  expired: number
+  suspended: number
+  unenrolled: number
+  overall: string // 'active' | 'expired' | 'suspended' | 'pending' | 'unenrolled' | 'no enrollments'
+}
 
 export interface Participant {
   id: string
@@ -11,6 +21,7 @@ export interface Participant {
   moodle_login_url?: string
   created_by?: string
   created_at: string
+  enrollment_summary?: EnrollmentSummary
 }
 
 export interface Enrollment {

@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { useAdmins, useCreateAdmin, useToggleAdminStatus, useResetAdminPassword } from '@/hooks/useAdmins'
+import { useAdmins, useCreateAdmin, useToggleAdminStatus, useResetAdminPassword, useAdminCategories, useSetAdminCategories } from '@/hooks/useAdmins'
+import { useCategories } from '@/hooks/useCategories'
 import { formatDate } from '@/utils/status'
 import type { AdminUser } from '@/types/admin'
 
@@ -132,10 +133,82 @@ function ResetPasswordModal({ admin, onClose }: { admin: AdminUser; onClose: () 
   )
 }
 
+// ─── Assign Categories Modal ──────────────────────────────────────────────────
+function AssignCategoriesModal({ admin, onClose }: { admin: AdminUser; onClose: () => void }) {
+  const { data: allCategories = [], isLoading: catsLoading } = useCategories()
+  const { data: assigned = [], isLoading: assignedLoading } = useAdminCategories(admin.id)
+  const { mutateAsync: save, isPending } = useSetAdminCategories()
+  const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [initialized, setInitialized] = useState(false)
+
+  // Pre-check already assigned categories
+  if (!initialized && !assignedLoading) {
+    setSelected(new Set(assigned.map(a => a.category_id)))
+    setInitialized(true)
+  }
+
+  const toggle = (id: number) => {
+    setSelected(s => {
+      const n = new Set(s)
+      n.has(id) ? n.delete(id) : n.add(id)
+      return n
+    })
+  }
+
+  const handleSave = async () => {
+    const categories = allCategories
+      .filter(c => selected.has(c.id))
+      .map(c => ({ category_id: c.id, category_name: c.name }))
+    await save({ adminId: admin.id, categories })
+    onClose()
+  }
+
+  return (
+    <ModalShell title={`Assign Categories — ${admin.username}`} onClose={onClose}>
+      <div className="space-y-4">
+        <p className="text-sm text-gray-400">
+          Pilih kategori Moodle yang boleh di-enroll oleh admin ini.
+        </p>
+
+        {catsLoading || assignedLoading ? (
+          <div className="flex justify-center py-6"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-500" /></div>
+        ) : allCategories.filter(c => c.id !== 1).length === 0 ? (
+          <p className="text-sm text-gray-500 text-center py-4">Tidak ada kategori ditemukan. Pastikan Moodle sudah terhubung.</p>
+        ) : (
+          <div className="bg-[#2a2d42] border border-[#2e3248] rounded-lg p-3 max-h-64 overflow-y-auto space-y-2">
+            {allCategories.filter(c => c.id !== 1).map(cat => (
+              <label key={cat.id} className="flex items-center gap-3 cursor-pointer mb-0 group">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 accent-indigo-500 flex-shrink-0"
+                  checked={selected.has(cat.id)}
+                  onChange={() => toggle(cat.id)}
+                />
+                <span className="text-sm text-gray-200 group-hover:text-white">{cat.name}</span>
+                <span className="text-xs text-gray-500 ml-auto">{cat.coursecount} courses</span>
+              </label>
+            ))}
+          </div>
+        )}
+
+        <div className="flex items-center justify-between pt-1">
+          <p className="text-xs text-gray-500">{selected.size} kategori dipilih</p>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="btn-secondary">Batal</button>
+            <button onClick={handleSave} disabled={isPending} className="btn-primary">
+              {isPending ? 'Menyimpan…' : 'Simpan'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </ModalShell>
+  )
+}
+
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 export default function AdminManagementPage() {
   const [page, setPage] = useState(1)
-  const [modal, setModal] = useState<null | 'create' | 'deactivate' | 'reset'>(null)
+  const [modal, setModal] = useState<null | 'create' | 'deactivate' | 'reset' | 'categories'>(null)
   const [selectedAdmin, setSelectedAdmin] = useState<AdminUser | null>(null)
 
   const { data, isLoading } = useAdmins(page, 20)
@@ -167,7 +240,7 @@ export default function AdminManagementPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-100">Manage Admins</h1>
-          <p className="text-gray-500 text-sm mt-0.5">Admin accounts for this CMS panel</p>
+          <p className="text-gray-500 text-sm mt-0.5">Buat akun admin dan assign kategori Moodle</p>
         </div>
         <button onClick={() => openModal('create')} className="btn-primary">+ Create Admin</button>
       </div>
@@ -207,6 +280,13 @@ export default function AdminManagementPage() {
                   <td className="px-4 py-3">
                     <div className="flex gap-2">
                       <button
+                        onClick={() => openModal('categories', admin)}
+                        className="text-xs px-2 py-1 rounded border border-indigo-800/50 text-indigo-400 hover:bg-indigo-900/20 transition-colors"
+                        title="Assign Moodle categories to this admin"
+                      >
+                        📂 Kategori
+                      </button>
+                      <button
                         onClick={() => handleToggle(admin)}
                         className={`text-xs px-2 py-1 rounded border transition-colors
                           ${admin.is_active
@@ -241,6 +321,7 @@ export default function AdminManagementPage() {
       {modal === 'create' && <CreateAdminModal onClose={closeModal} />}
       {modal === 'deactivate' && selectedAdmin && <ConfirmDeactivateModal admin={selectedAdmin} onConfirm={handleConfirmDeactivate} onClose={closeModal} />}
       {modal === 'reset' && selectedAdmin && <ResetPasswordModal admin={selectedAdmin} onClose={closeModal} />}
+      {modal === 'categories' && selectedAdmin && <AssignCategoriesModal admin={selectedAdmin} onClose={closeModal} />}
     </div>
   )
 }

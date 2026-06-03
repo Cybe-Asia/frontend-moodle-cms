@@ -20,3 +20,11 @@ export interface AdminListResponse {
   page: number
   limit: number
 }
+
+export interface AdminCategoryAssignment {
+  id: string
+  admin_id: string
+  category_id: number
+  category_name: string
+  assigned_by?: string
+}

@@ -1,7 +1,9 @@
 import { useState, useCallback } from 'react'
 import { useParticipants, useEnrollmentStatus, useRegisterEnroll, useUpdateEnrollment, useUnenroll } from '@/hooks/useParticipants'
 import { useCategories } from '@/hooks/useCategories'
-import { statusBadgeClass, formatDate } from '@/utils/status'
+import { useMyCategories } from '@/hooks/useAdmins'
+import { useAuthStore } from '@/store/auth.store'
+import { statusBadgeClass, statusLabel, formatDate } from '@/utils/status'
 import type { Participant, RegisterEnrollRequest } from '@/types/participant'
 import type { Category } from '@/types/moodle'
 
@@ -12,6 +14,9 @@ function StatusBadge({ status }: { status: string }) {
 
 // ─── Register Modal ────────────────────────────────────────────────────────────
 function RegisterModal({ categories, onClose }: { categories: Category[]; onClose: () => void }) {
+  const { user } = useAuthStore()
+  const isSuperAdmin = user?.role === 'super_admin'
+  const { data: myCategories = [] } = useMyCategories()
   const { mutateAsync, isPending } = useRegisterEnroll()
   const [form, setForm] = useState<RegisterEnrollRequest>({
     username: '', password: '', firstname: '', lastname: '', email: '',
@@ -103,24 +108,45 @@ function RegisterModal({ categories, onClose }: { categories: Category[]; onClos
           <input value={form.idnumber} onChange={(e) => setForm((f) => ({ ...f, idnumber: e.target.value }))} placeholder="EMP-001" />
         </Field>
 
-        {/* Categories */}
-        <div>
-          <label>Categories *</label>
-          <div className="bg-[#2a2d42] border border-[#2e3248] rounded-lg p-3 max-h-40 overflow-y-auto space-y-2">
-            {categories.filter(c => c.id !== 1).map((cat) => (
-              <label key={cat.id} className="flex items-center gap-2 cursor-pointer mb-0">
-                <input
-                  type="checkbox"
-                  className="w-4 h-4 accent-indigo-500"
-                  checked={form.category_ids.includes(cat.id)}
-                  onChange={() => toggleCategory(cat.id)}
-                />
-                <span className="text-sm text-gray-200">{cat.name}</span>
-                <span className="text-xs text-gray-500 ml-auto">{cat.coursecount} courses</span>
-              </label>
-            ))}
+        {/* Categories — Super Admin: manual pick | Admin: read-only assigned list */}
+        {isSuperAdmin ? (
+          <div>
+            <label>Categories *</label>
+            <div className="bg-[#2a2d42] border border-[#2e3248] rounded-lg p-3 max-h-40 overflow-y-auto space-y-2">
+              {categories.filter(c => c.id !== 1).map((cat) => (
+                <label key={cat.id} className="flex items-center gap-2 cursor-pointer mb-0">
+                  <input
+                    type="checkbox"
+                    className="w-4 h-4 accent-indigo-500"
+                    checked={form.category_ids.includes(cat.id)}
+                    onChange={() => toggleCategory(cat.id)}
+                  />
+                  <span className="text-sm text-gray-200">{cat.name}</span>
+                  <span className="text-xs text-gray-500 ml-auto">{cat.coursecount} courses</span>
+                </label>
+              ))}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div>
+            <label>Enrolled to Categories (assigned by Super Admin)</label>
+            {myCategories.length === 0 ? (
+              <div className="bg-yellow-900/20 border border-yellow-700/40 rounded-lg p-3 text-sm text-yellow-400">
+                ⚠️ Belum ada kategori yang diassign ke akunmu. Hubungi Super Admin.
+              </div>
+            ) : (
+              <div className="bg-[#2a2d42] border border-[#2e3248] rounded-lg p-3 space-y-2">
+                {myCategories.map(cat => (
+                  <div key={cat.category_id} className="flex items-center gap-2 text-sm">
+                    <span className="text-indigo-400">✓</span>
+                    <span className="text-gray-200">{cat.category_name}</span>
+                  </div>
+                ))}
+                <p className="text-xs text-gray-500 pt-1">Peserta akan di-enroll ke semua kategori di atas secara otomatis.</p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Role */}
         <Field label="Role *">
@@ -160,7 +186,11 @@ function RegisterModal({ categories, onClose }: { categories: Category[]; onClos
           </div>
         )}
 
-        <button type="submit" disabled={isPending || form.category_ids.length === 0} className="btn-primary w-full">
+        <button
+          type="submit"
+          disabled={isPending || (isSuperAdmin && form.category_ids.length === 0) || (!isSuperAdmin && myCategories.length === 0)}
+          className="btn-primary w-full"
+        >
           {isPending ? 'Processing…' : 'Register & Enroll'}
         </button>
       </form>
@@ -414,7 +444,7 @@ export default function ParticipantsPage() {
           onChange={(e) => { setSearch(e.target.value); setPage(1) }}
         />
         <select
-          className="max-w-[160px]"
+          className="max-w-[180px]"
           value={statusFilter}
           onChange={(e) => { setStatusFilter(e.target.value); setPage(1) }}
         >
@@ -423,6 +453,7 @@ export default function ParticipantsPage() {
           <option value="pending">Pending</option>
           <option value="expired">Expired</option>
           <option value="suspended">Suspended</option>
+          <option value="unenrolled">Unenrolled</option>
         </select>
       </div>
 
@@ -439,18 +470,37 @@ export default function ParticipantsPage() {
                 <th className="table-header text-left px-6 py-3">Name</th>
                 <th className="table-header text-left px-4 py-3">Username</th>
                 <th className="table-header text-left px-4 py-3">Email</th>
-                <th className="table-header text-left px-4 py-3">Moodle ID</th>
+                <th className="table-header text-left px-4 py-3">Status</th>
+                <th className="table-header text-left px-4 py-3">Courses</th>
                 <th className="table-header text-left px-4 py-3">Registered</th>
                 <th className="table-header text-left px-4 py-3">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {data.data.map((p) => (
+              {data.data.map((p) => {
+                const summary = p.enrollment_summary
+                const overall = summary?.overall || 'no enrollments'
+                return (
                 <tr key={p.id} className="table-row">
                   <td className="px-6 py-3 font-medium text-gray-200">{p.firstname} {p.lastname}</td>
                   <td className="px-4 py-3 text-gray-400">{p.username}</td>
                   <td className="px-4 py-3 text-gray-400">{p.email}</td>
-                  <td className="px-4 py-3 text-gray-500">{p.moodle_user_id}</td>
+                  <td className="px-4 py-3">
+                    <span className={statusBadgeClass(overall)}>{statusLabel(overall)}</span>
+                  </td>
+                  <td className="px-4 py-3">
+                    {summary && summary.total > 0 ? (
+                      <div className="flex gap-1 flex-wrap">
+                        {summary.active > 0 && <span className="badge-green text-xs">{summary.active} active</span>}
+                        {summary.pending > 0 && <span className="badge-blue text-xs">{summary.pending} pending</span>}
+                        {summary.expired > 0 && <span className="badge-red text-xs">{summary.expired} expired</span>}
+                        {summary.suspended > 0 && <span className="badge-orange text-xs">{summary.suspended} suspended</span>}
+                        {summary.unenrolled > 0 && <span className="badge-gray text-xs">{summary.unenrolled} unenrolled</span>}
+                      </div>
+                    ) : (
+                      <span className="text-gray-600 text-xs">—</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-gray-500">{formatDate(p.created_at)}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
@@ -460,7 +510,7 @@ export default function ParticipantsPage() {
                     </div>
                   </td>
                 </tr>
-              ))}
+              )})}
             </tbody>
           </table>
         )}

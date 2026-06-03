@@ -32,3 +32,30 @@ export function useResetAdminPassword() {
       adminService.resetPassword(id, newPassword),
   })
 }
+
+export function useAdminCategories(adminId: string | null) {
+  return useQuery({
+    queryKey: ['admin-categories', adminId],
+    queryFn: () => adminService.getAdminCategories(adminId!),
+    enabled: !!adminId,
+  })
+}
+
+export function useSetAdminCategories() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ adminId, categories }: {
+      adminId: string
+      categories: { category_id: number; category_name: string }[]
+    }) => adminService.setAdminCategories(adminId, categories),
+    onSuccess: (_data, vars) => qc.invalidateQueries({ queryKey: ['admin-categories', vars.adminId] }),
+  })
+}
+
+export function useMyCategories() {
+  return useQuery({
+    queryKey: ['my-categories'],
+    queryFn: adminService.myCategories,
+    staleTime: 60_000,
+  })
+}
